@@ -41,6 +41,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		}
 	}
 	for _, v := range activities {
+		pass.ExportObjectFact(v, new(isWorkflow))
 		if isDebug() {
 			fmt.Printf("Activity: %s\n", v)
 		}
