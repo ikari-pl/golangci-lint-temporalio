@@ -1,6 +1,6 @@
 module github.com/ikari-pl/golangci-lint-temporalio
 
-go 1.21.3
+go 1.21
 
 require (
 	go.temporal.io/sdk v1.26.0
