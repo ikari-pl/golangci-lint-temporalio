@@ -54,11 +54,11 @@ func run(pass *analysis.Pass) (interface{}, error) {
 					for i := 0; i < s.NumFields(); i++ {
 						f := s.Field(i)
 						if len(f.Name()) > 0 && unicode.IsLower(rune(f.Name()[0])) {
-							pass.Reportf(c.Pos, "Field %s of %s is not exported - it will not "+
+							pass.Reportf(c.Pos, "Field `%s` of `%s` is not exported - it will not "+
 									"be visible on the receiving end, and will assume its zero value", f.Name(), c.Callee.Name())
 						}
 						if !asttools.IsSerializable(f.Type()) {
-							pass.Reportf(c.Pos, "Field %s of %s is not serializable - it will not "+
+							pass.Reportf(c.Pos, "Field `%s` of `%s` is not serializable - it will not "+
 									"be visible on the receiving end, and will assume its zero value", f.Name(), c.Callee.Name())
 						}
 					}
