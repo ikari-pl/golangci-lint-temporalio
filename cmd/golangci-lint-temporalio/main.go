@@ -1,10 +1,11 @@
 package main
 
 import (
-	"github.com/ikari-pl/golangci-lint-temporalio/pkg/analyzer"
-	"golang.org/x/tools/go/analysis/singlechecker"
+	"github.com/ikari-pl/golangci-lint-temporalio/pkg/callables"
+	"github.com/ikari-pl/golangci-lint-temporalio/pkg/serializable"
+	"golang.org/x/tools/go/analysis/multichecker"
 )
 
 func main() {
-	singlechecker.Main(analyzer.Analyzer)
+	multichecker.Main(callables.Analyzer, serializable.Analyzer)
 }

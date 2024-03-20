@@ -12,7 +12,7 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-var TemporalCallables = &analysis.Analyzer{
+var Analyzer = &analysis.Analyzer{
 	Name:       "TemporalioCallables",
 	Doc:        "Detects registrations of, and calls to Temporal.io workflows and activities",
 	Run:        run,

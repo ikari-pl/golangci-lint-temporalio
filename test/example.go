@@ -42,6 +42,12 @@ func Main() {
 func HelloWorldWorkflow(ctx workflow.Context, name string) (string, error) {
 	var result string
 	err := workflow.ExecuteActivity(ctx, HelloWorldActivity, name).Get(ctx, &result)
+	if err != nil {
+		return "", err
+	}
+
+	var act *SophisticatedHelloWorldActivity
+	err = workflow.ExecuteActivity(ctx, act.Greet2, Greet2Param{name: name}).Get(ctx, &result)
 	return result, err
 }
 
@@ -51,6 +57,14 @@ func HelloWorldActivity(ctx context.Context, name string) (string, error) {
 
 type SophisticatedHelloWorldActivity struct{}
 
-func (s *SophisticatedHelloWorldActivity) Execute(ctx context.Context, name string) (string, error) {
+func (s *SophisticatedHelloWorldActivity) Greet(ctx context.Context, name string) (string, error) {
 	return "Hello " + name, nil
+}
+
+type Greet2Param struct {
+	name string // this will fail because it's not exported
+}
+
+func (s *SophisticatedHelloWorldActivity) Greet2(ctx context.Context, param Greet2Param) (string, error) {
+	return "Hello " + param.name, nil
 }

@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"unicode"
 
 	"github.com/ikari-pl/golangci-lint-temporalio/pkg/asttools"
 	"github.com/ikari-pl/golangci-lint-temporalio/pkg/callables"
@@ -18,7 +19,7 @@ var Analyzer = &analysis.Analyzer{
 	Doc:  "Checks that all temporal.io arguments and return values contain serializable fields only.",
 	Run:  run,
 	Requires: []*analysis.Analyzer{
-		callables.TemporalCallables,
+		callables.Analyzer,
 	},
 	Flags: flag.FlagSet{},
 }
@@ -36,13 +37,34 @@ func run(pass *analysis.Pass) (interface{}, error) {
 
 	// Import facts about detected Temporal.io workflows and activities
 	// from the callables analyzer
-	thisPkg := pass.ResultOf[callables.TemporalCallables].(callables.Callables)
-	fmt.Print(thisPkg)
+	thisPkg := pass.ResultOf[callables.Analyzer].(callables.Callables)
+	if debug {
+		fmt.Printf("Found %d workflows and %d activities\n", len(thisPkg.Workflows), len(thisPkg.Activities))
+	}
 
 	// get all places where we call a workflow or an activity
 	calls := identifyCalls(pass)
 	for _, c := range calls {
-		fmt.Println(c.Callee)
+		flowArgs := c.Expr.Args[2:]
+		for _, arg := range flowArgs {
+			t := pass.TypesInfo.TypeOf(arg)
+			// if t is a struct, or a pointer to a struct, check if it's serializable
+			if t != nil {
+				if s, ok := t.Underlying().(*types.Struct); ok {
+					for i := 0; i < s.NumFields(); i++ {
+						f := s.Field(i)
+						if len(f.Name()) > 0 && unicode.IsLower(rune(f.Name()[0])) {
+							pass.Reportf(c.Pos, "Field %s of %s is not exported - it will not "+
+									"be visible on the receiving end, and will assume its zero value", f.Name(), c.Callee.Name())
+						}
+						if !asttools.IsSerializable(f.Type()) {
+							pass.Reportf(c.Pos, "Field %s of %s is not serializable - it will not "+
+									"be visible on the receiving end, and will assume its zero value", f.Name(), c.Callee.Name())
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// Check that all arguments and return values of detected Temporal.io
@@ -74,7 +96,7 @@ func identifyCalls(pass *analysis.Pass) []TemporalCall {
 			if !ok {
 				return true
 			}
-			if !(selector.Sel.Name == "ExecuteWorkflow" || selector.Sel.Name == "ExecuteActivity") {
+			if selector.Sel.Name != "ExecuteWorkflow" && selector.Sel.Name != "ExecuteActivity" {
 				return true
 			}
 			x, ok := selector.X.(*ast.Ident)
@@ -82,16 +104,25 @@ func identifyCalls(pass *analysis.Pass) []TemporalCall {
 				return true
 			}
 
-			// client.ExecuteWorkflow(ctx, StartWorkflowOptions{}, "World")
+			// for workflows, we find:   client.ExecuteWorkflow(ctx, StartWorkflowOptions{}, "World")
 			// and for activities, it's: workflow.ExecuteActivity(ctx, HelloWorldActivity, name)
 			// where workflow is import "go.temporal.io/sdk/workflow"
-
+			if len(call.Args) < 2 {
+				// warn: not enough arguments, should never happen
+				panic("not enough arguments to be a valid ExecuteWorkflow/Activity call")
+			}
 			xType := pass.TypesInfo.TypeOf(x)
 			if xType != nil && xType.String() == externalDeps.ClientType {
+				callee := call.Args[2]
+				calleeId := asttools.IdentifierOf(callee)
+				caleeObj := pass.TypesInfo.ObjectOf(calleeId)
+
 				calls = append(calls, TemporalCall{
 					Pos:      call.Pos(),
 					FileName: pass.Fset.Position(call.Pos()).Filename,
 					CallName: selector.Sel.Name,
+					Expr:     call,
+					Callee:   caleeObj,
 				})
 			}
 
@@ -109,16 +140,12 @@ func identifyCalls(pass *analysis.Pass) []TemporalCall {
 			if !ok {
 				return true
 			}
-
-			if len(call.Args) < 2 {
-				// warn: not enough arguments, should never happen
-			}
-			callee := call.Args[1]
-			calleeId := asttools.IdentifierOf(callee)
-			caleeObj := pass.TypesInfo.ObjectOf(calleeId)
-
-			// check if the package name is "workflow" and the import path is "go.temporal.io/sdk/workflow"
+			// check if the package name is "go.temporal.io/sdk/workflow"
 			if p.Imported().Path() == externalDeps.WorkflowPkg {
+				callee := call.Args[1]
+				calleeId := asttools.IdentifierOf(callee)
+				caleeObj := pass.TypesInfo.ObjectOf(calleeId)
+
 				calls = append(calls, TemporalCall{
 					Pos:      call.Pos(),
 					FileName: pass.Fset.Position(call.Pos()).Filename,
