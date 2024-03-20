@@ -18,13 +18,19 @@ var TemporalCallables = &analysis.Analyzer{
 	FactTypes:  []analysis.Fact{new(isWorkflow), new(isActivity), new(isWorkflowCall), new(isActivityCall)},
 	ResultType: reflect.TypeOf(Callables{}),
 }
+
 var tcFlags flag.FlagSet
+var debug bool
 
 const (
 	WorkerType  = "go.temporal.io/sdk/worker.Worker"
 	ClientType  = "go.temporal.io/sdk/client.Client"
 	WorkflowPkg = "go.temporal.io/sdk/workflow"
 )
+
+func init() {
+	tcFlags.BoolVar(&debug, "debug", false, "Enable debug mode")
+}
 
 func run(pass *analysis.Pass) (interface{}, error) {
 	workflows, activities := identifyCallable(pass)
@@ -51,7 +57,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 }
 
 func isDebug() bool {
-	return tcFlags.Lookup("debug") != nil
+	return debug
 }
 
 func identifyCallable(pass *analysis.Pass) (workflows, activities []types.Object) {

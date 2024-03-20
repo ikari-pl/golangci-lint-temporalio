@@ -1,4 +1,4 @@
-package analyzer
+package serializable
 
 import (
 	"flag"
@@ -19,7 +19,7 @@ var Analyzer = &analysis.Analyzer{
 }
 
 func init() {
-	Analyzer.Flags.BoolVar(&debug, "debug", false, "Enable debug mode")
+	Analyzer.Flags.BoolVar(&debug, "debug-serializable", false, "Enable debug mode")
 }
 
 var debug bool
