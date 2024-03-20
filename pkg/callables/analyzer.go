@@ -7,6 +7,8 @@ import (
 	"go/types"
 	"reflect"
 
+	"github.com/ikari-pl/golangci-lint-temporalio/pkg/asttools"
+	"github.com/ikari-pl/golangci-lint-temporalio/pkg/externalDeps"
 	"golang.org/x/tools/go/analysis"
 )
 
@@ -21,12 +23,6 @@ var TemporalCallables = &analysis.Analyzer{
 
 var tcFlags flag.FlagSet
 var debug bool
-
-const (
-	WorkerType  = "go.temporal.io/sdk/worker.Worker"
-	ClientType  = "go.temporal.io/sdk/client.Client"
-	WorkflowPkg = "go.temporal.io/sdk/workflow"
-)
 
 func init() {
 	tcFlags.BoolVar(&debug, "debug", false, "Enable debug mode")
@@ -46,11 +42,6 @@ func run(pass *analysis.Pass) (interface{}, error) {
 			fmt.Printf("Activity: %s\n", v)
 		}
 	}
-	calls := identifyCalls(pass)
-	for _, call := range calls {
-		pass.Reportf(call.Pos, "Temporal call to %s in %s", call.CallName, call.FileName)
-	}
-
 	return Callables{
 		Workflows:  workflows,
 		Activities: activities,
@@ -77,13 +68,13 @@ func identifyCallable(pass *analysis.Pass) (workflows, activities []types.Object
 				if callExpr, ok := n.(*ast.CallExpr); ok {
 					if selector, ok := callExpr.Fun.(*ast.SelectorExpr); ok {
 						xType := pass.TypesInfo.TypeOf(selector.X)
-						if xType != nil && xType.String() == WorkerType {
+						if xType != nil && xType.String() == externalDeps.WorkerType {
 							if selector.Sel.Name == "RegisterActivity" {
-								firstArgObj := pass.TypesInfo.ObjectOf(identifierOf(callExpr.Args[0]))
+								firstArgObj := pass.TypesInfo.ObjectOf(asttools.IdentifierOf(callExpr.Args[0]))
 								knownActivities = append(knownActivities, firstArgObj)
 							}
 							if selector.Sel.Name == "RegisterWorkflow" {
-								firstArgObj := pass.TypesInfo.ObjectOf(identifierOf(callExpr.Args[0]))
+								firstArgObj := pass.TypesInfo.ObjectOf(asttools.IdentifierOf(callExpr.Args[0]))
 								knownWorkflows = append(knownWorkflows, firstArgObj)
 							}
 						}
@@ -98,102 +89,4 @@ func identifyCallable(pass *analysis.Pass) (workflows, activities []types.Object
 		})
 	}
 	return knownWorkflows, knownActivities
-}
-
-// identifierOf returns the *ast.Ident for the given *ast.Expr, whatever it is.
-func identifierOf(e ast.Expr) *ast.Ident {
-	switch e := e.(type) {
-	case *ast.Ident:
-		return e
-	case *ast.SelectorExpr:
-		return identifierOf(e.Sel)
-	case *ast.StarExpr:
-		return identifierOf(e.X)
-	case *ast.CallExpr:
-		return identifierOf(e.Fun)
-	// pointer to a function
-	case *ast.FuncType:
-		return identifierOf(e)
-	// pointer to a struct (represented as unary AND of a composite literal)
-	case *ast.UnaryExpr:
-		return identifierOf(e.X)
-	// continuation of pointer to a struct (represented as composite literal)
-	case *ast.CompositeLit:
-		return identifierOf(e.Type)
-	default:
-		return nil
-	}
-}
-
-func identifyCalls(pass *analysis.Pass) []TemporalCall {
-	var calls []TemporalCall
-	for _, f := range pass.Files {
-		ast.Inspect(f, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			selector, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			if !(selector.Sel.Name == "ExecuteWorkflow" || selector.Sel.Name == "ExecuteActivity") {
-				return true
-			}
-			x, ok := selector.X.(*ast.Ident)
-			if !ok {
-				return true
-			}
-
-			// client.ExecuteWorkflow(ctx, StartWorkflowOptions{}, "World")
-			xType := pass.TypesInfo.TypeOf(x)
-			if xType != nil && xType.String() == ClientType {
-				calls = append(calls, TemporalCall{
-					Pos:      call.Pos(),
-					FileName: pass.Fset.Position(call.Pos()).Filename,
-					CallName: selector.Sel.Name,
-				})
-			}
-			// and for activities, it's: workflow.ExecuteActivity(ctx, HelloWorldActivity, name)
-			// where workflow is import "go.temporal.io/sdk/workflow"
-
-			// we need to resolve x.Name going up the scope chain to find the package name
-			// and then check if it's a package we care about
-
-			// get the scope at call.Pos()
-			// get the package name from the scope
-			// check if the package name is "workflow" and the import path is "go.temporal.io/sdk/workflow"
-			// if so, record the call
-			// if not, continue
-			// if we reach the top of the scope chain, continue
-			// if we reach the top of the file, continue
-
-			// get the scope at call.Pos()
-			scope := pass.TypesInfo.ObjectOf(x).Parent()
-			if scope == nil {
-				return true
-			}
-			o := scope.Lookup(x.Name)
-			if o == nil {
-				return true
-			}
-			// get the package name from the scope if o is a *types.PkgName
-			p, ok := o.(*types.PkgName)
-			if !ok {
-				return true
-			}
-
-			// check if the package name is "workflow" and the import path is "go.temporal.io/sdk/workflow"
-			if p.Imported().Path() == WorkflowPkg {
-				calls = append(calls, TemporalCall{
-					Pos:      call.Pos(),
-					FileName: pass.Fset.Position(call.Pos()).Filename,
-					CallName: selector.Sel.Name,
-				})
-			}
-
-			return true
-		})
-	}
-	return calls
 }
