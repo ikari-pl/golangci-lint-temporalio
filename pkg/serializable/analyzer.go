@@ -89,79 +89,91 @@ func run(pass *analysis.Pass) (interface{}, error) {
 			actualT := pass.TypesInfo.TypeOf(callArg)
 			// if actualT is a struct, or a pointer to a struct, check if it's serializable
 			if actualT != nil {
-				if s, ok := actualT.Underlying().(*types.Struct); ok {
-					for i := 0; i < s.NumFields(); i++ {
-						f := s.Field(i)
-						if len(f.Name()) > 0 && unicode.IsLower(rune(f.Name()[0])) {
-							pass.Reportf(c.Pos, "Field `%s` of `%s` is not exported - it will not "+
-									"be visible on the receiving end, and will assume its zero value", f.Name(), c.Callee.Name())
-						}
-						if !asttools.IsSerializable(f.Type()) {
-							pass.Reportf(c.Pos, "Field `%s` of `%s` is not serializable - it will not "+
-									"be visible on the receiving end, and will assume its zero value", f.Name(), c.Callee.Name())
-						}
-					}
-				}
+				checkStructArg(pass, c, actualT)
 			}
 		}
 
 		// additionally, check if the type of the argument matches the argument type of the workflow/activity
 		if callee != nil {
 			signature := callee.Type().(*types.Signature)
-			expectedParams := signature.Params().Len() - 1
-			// we are going to strictly check argsCount arguments
-			argsCount := max(expectedParams, len(callArgs))
-			// if the signature is variadic, we need to compare the count of arguments minus the variadic parameter
-			if signature.Variadic() {
-				argsCount = max(signature.Params().Len()-1, len(callArgs))
-			}
 
-			if !signature.Variadic() {
-				// for non variadic, we can check if the number of arguments is correct
-				if expectedParams < len(callArgs) {
-					pass.Reportf(c.Pos, "Too many arguments to `%s` - expected %d, got %d", callee.Name(),
-						expectedParams, len(callArgs))
-				}
-				if expectedParams > len(callArgs) {
-					pass.Reportf(c.Pos, "Too few arguments to `%s` - expected %d, got %d", callee.Name(),
-						expectedParams, len(callArgs))
-				}
-			} else {
-				// for variadic, we can only check if the number of arguments is at least the number of non-variadic parameters
-				if len(callArgs) < signature.Params().Len()-1 {
-					pass.Reportf(c.Pos, "Too few arguments to `%s` - expected at least %d, got %d", callee.Name(),
-						signature.Params().Len()-1, len(callArgs))
-				}
-			}
-
-			for argIdx := range argsCount {
-				var expectedT, actualT types.Type
-				// Notes:
-				// - expected args start with a context, that is not included in the call arguments
-				// - for variadic functions, we need to compare the type of the variadic parameter ([]T)
-				//   with the type of all trailing arguments (T)
-				if signature.Variadic() && argIdx >= expectedParams-1 {
-					expectedT = signature.Params().At(signature.Params().Len() - 1).Type().(*types.Slice).Elem()
-				} else {
-					if argIdx < signature.Params().Len()-1 {
-						expectedT = signature.Params().At(argIdx + 1).Type()
-					}
-				}
-				if argIdx < len(callArgs) {
-					actualT = pass.TypesInfo.TypeOf(callArgs[argIdx])
-				}
-				if expectedT == nil || actualT == nil {
-					continue
-				}
-				if !types.Identical(expectedT, actualT) {
-					ordinal := numberToOrdinal(argIdx + 1)
-					pass.Reportf(c.Pos, "Type of %s argument to `%s` does not match the type of the workflow/activity\n"+
-							"\tExpected: %s,\n\t     got: %s", ordinal, callee.Name(), expectedT, actualT)
-				}
-			}
+			checkArgumentCount(pass, c.Pos, callee.Name(), signature, callArgs)
+			checkArgumentTypes(pass, c.Pos, callee.Name(), signature, callArgs)
 		}
 	}
 	return nil, nil
+}
+
+func checkStructArg(pass *analysis.Pass, c TemporalCall, actualT types.Type) {
+	if s, ok := actualT.Underlying().(*types.Struct); ok {
+		for i := 0; i < s.NumFields(); i++ {
+			f := s.Field(i)
+			if len(f.Name()) > 0 && unicode.IsLower(rune(f.Name()[0])) {
+				pass.Reportf(c.Pos, "Field `%s` of `%s` is not exported - it will not "+
+						"be visible on the receiving end, and will assume its zero value", f.Name(), c.Callee.Name())
+			}
+			if !asttools.IsSerializable(f.Type()) {
+				pass.Reportf(c.Pos, "Field `%s` of `%s` is not serializable - it will not "+
+						"be visible on the receiving end, and will assume its zero value", f.Name(), c.Callee.Name())
+			}
+		}
+	}
+}
+
+func checkArgumentTypes(pass *analysis.Pass, pos token.Pos, callee string, signature *types.Signature, callArgs []ast.Expr) {
+	expectedParams := signature.Params().Len() - 1
+	// we are going to check up to the maximum of expected and actual arguments
+	argsCount := max(expectedParams, len(callArgs))
+	// if the signature is variadic, we need to compare the count of arguments minus the variadic parameter
+	if signature.Variadic() {
+		argsCount = max(signature.Params().Len()-1, len(callArgs))
+	}
+	for argIdx := range argsCount {
+		var expectedT, actualT types.Type
+		// Notes:
+		// - expected args start with a context, that is not included in the call arguments
+		// - for variadic functions, we need to compare the type of the variadic parameter ([]T)
+		//   with the type of all trailing arguments (T)
+		if signature.Variadic() && argIdx >= expectedParams-1 {
+			expectedT = signature.Params().At(signature.Params().Len() - 1).Type().(*types.Slice).Elem()
+		} else {
+			if argIdx < signature.Params().Len()-1 {
+				expectedT = signature.Params().At(argIdx + 1).Type()
+			}
+		}
+		if argIdx < len(callArgs) {
+			actualT = pass.TypesInfo.TypeOf(callArgs[argIdx])
+		}
+		if expectedT == nil || actualT == nil {
+			continue
+		}
+		if !types.Identical(expectedT, actualT) {
+			ordinal := numberToOrdinal(argIdx + 1)
+			pass.Reportf(pos, "Type of %s argument to `%s` does not match the type of the workflow/activity\n"+
+					"\tExpected: %s,\n\t     got: %s", ordinal, callee, expectedT, actualT)
+		}
+	}
+}
+
+func checkArgumentCount(pass *analysis.Pass, pos token.Pos, calleeName string, signature *types.Signature, callArgs []ast.Expr) {
+	expectedParams := signature.Params().Len() - 1
+	if !signature.Variadic() {
+		// for non variadic, we can check if the number of arguments is correct
+		if expectedParams < len(callArgs) {
+			pass.Reportf(pos, "Too many arguments to `%s` - expected %d, got %d", calleeName,
+				expectedParams, len(callArgs))
+		}
+		if expectedParams > len(callArgs) {
+			pass.Reportf(pos, "Too few arguments to `%s` - expected %d, got %d", calleeName,
+				expectedParams, len(callArgs))
+		}
+	} else {
+		// for variadic, we can only check if the number of arguments is at least the number of non-variadic parameters
+		if len(callArgs) < signature.Params().Len()-1 {
+			pass.Reportf(pos, "Too few arguments to `%s` - expected at least %d, got %d", calleeName,
+				signature.Params().Len()-1, len(callArgs))
+		}
+	}
 }
 
 // TemporalCall represents a detected Temporal.io workflow or activity invocation.
