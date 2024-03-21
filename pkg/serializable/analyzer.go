@@ -8,10 +8,12 @@ import (
 	"go/types"
 	"unicode"
 
+	"github.com/spf13/pflag"
+	"golang.org/x/tools/go/analysis"
+
 	"github.com/ikari-pl/golangci-lint-temporalio/pkg/asttools"
 	"github.com/ikari-pl/golangci-lint-temporalio/pkg/callables"
 	"github.com/ikari-pl/golangci-lint-temporalio/pkg/externalDeps"
-	"golang.org/x/tools/go/analysis"
 )
 
 var Analyzer = &analysis.Analyzer{
@@ -26,9 +28,12 @@ var Analyzer = &analysis.Analyzer{
 
 func init() {
 	Analyzer.Flags.BoolVar(&debug, "debug-serializable", false, "Enable debug mode")
+	Analyzer.Flags.BoolVar(&reportUnresolved, "report-unresolved", false, "Report unresolved workflow/activity names")
+	pflag.CommandLine.AddGoFlagSet(&Analyzer.Flags)
 }
 
 var debug bool
+var reportUnresolved bool
 
 func run(pass *analysis.Pass) (interface{}, error) {
 	if debug {
@@ -45,26 +50,104 @@ func run(pass *analysis.Pass) (interface{}, error) {
 	// get all places where we call a workflow or an activity
 	calls := identifyCalls(pass)
 	for _, c := range calls {
-		flowArgs := c.Expr.Args[2:]
-		for _, arg := range flowArgs {
-			t := pass.TypesInfo.TypeOf(arg)
-			// if t is a struct, or a pointer to a struct, check if it's serializable
-			if t != nil {
-				if s, ok := t.Underlying().(*types.Struct); ok {
+		isWorkflow := c.CallName == "ExecuteWorkflow"
+		isActivity := c.CallName == "ExecuteActivity"
+		var callArgs []ast.Expr
+		if isWorkflow {
+			callArgs = c.Expr.Args[1:]
+		} else if isActivity {
+			callArgs = c.Expr.Args[2:]
+		} else {
+			// we need to support more calls
+			panic("unknown call type " + c.CallName)
+		}
+		callee := c.Callee
+		if c.Callee == nil {
+			caleePos := 2 // default to workflow identifier
+			if c.CallName == "ExecuteActivity" {
+				caleePos = 1
+			}
+			// we may not know the type, let's see if it's called by name
+			// if it's called by name, we can look it up in the package
+			// if it's not, we can't do anything
+			if c.Expr.Args[caleePos].(*ast.BasicLit).Kind == token.STRING {
+				// we have a string literal, we can look it up
+				for _, o := range thisPkg.Workflows {
+					if o.Name() == c.Expr.Args[caleePos].(*ast.BasicLit).Value {
+						callee = o
+						break
+					}
+				}
+				if callee == nil && reportUnresolved {
+					// can we make it a warning?
+					pass.Reportf(c.Pos, "Could not resolve the type of the workflow/activity")
+				}
+			}
+		}
+
+		for _, callArg := range callArgs {
+			actualT := pass.TypesInfo.TypeOf(callArg)
+			// if actualT is a struct, or a pointer to a struct, check if it's serializable
+			if actualT != nil {
+				if s, ok := actualT.Underlying().(*types.Struct); ok {
 					for i := 0; i < s.NumFields(); i++ {
 						f := s.Field(i)
 						if len(f.Name()) > 0 && unicode.IsLower(rune(f.Name()[0])) {
 							pass.Reportf(c.Pos, "Field `%s` of `%s` is not exported - it will not "+
-									"be visible on the receiving end, and will assume its zero value", f.Name(), c.Callee.Name())
+								"be visible on the receiving end, and will assume its zero value", f.Name(), c.Callee.Name())
 						}
 						if !asttools.IsSerializable(f.Type()) {
 							pass.Reportf(c.Pos, "Field `%s` of `%s` is not serializable - it will not "+
-									"be visible on the receiving end, and will assume its zero value", f.Name(), c.Callee.Name())
+								"be visible on the receiving end, and will assume its zero value", f.Name(), c.Callee.Name())
 						}
 					}
 				}
 			}
 		}
+
+		// additionally, check if the type of the argument matches the argument type of the workflow/activity
+		if callee != nil {
+			signature := callee.Type().(*types.Signature)
+			expectedParams := signature.Params().Len() - 1
+			// we are going to strictly check argsCount arguments
+			argsCount := max(expectedParams, len(callArgs))
+			// if the signature is variadic, we need to compare the count of arguments minus the variadic parameter
+			if signature.Variadic() {
+				argsCount = max(signature.Params().Len()-1, len(callArgs))
+			}
+
+			if !signature.Variadic() {
+				// for non variadic, we can check if the number of arguments is correct
+				if expectedParams < len(callArgs) {
+					pass.Reportf(c.Pos, "Too many arguments to `%s` - expected %d, got %d", callee.Name(),
+						expectedParams, len(callArgs))
+				}
+				if expectedParams > len(callArgs) {
+					pass.Reportf(c.Pos, "Too few arguments to `%s` - expected %d, got %d", callee.Name(),
+						expectedParams, len(callArgs))
+				}
+			}
+
+			for argIdx := range argsCount {
+				var expectedT, actualT types.Type
+				// expected args start with a context, that is not included in the call arguments
+				if argIdx < signature.Params().Len()-1 {
+					expectedT = signature.Params().At(argIdx + 1).Type()
+				}
+				if argIdx < len(callArgs) {
+					actualT = pass.TypesInfo.TypeOf(callArgs[argIdx])
+				}
+				if expectedT == nil || actualT == nil {
+					continue
+				}
+				if !types.Identical(expectedT, actualT) {
+					ordinal := numberToOrdinal(argIdx + 1)
+					pass.Reportf(c.Pos, "Type of %s argument to `%s` does not match the type of the workflow/activity\n"+
+						"\tExpected: %s,\n\t     got: %s", ordinal, callee.Name(), expectedT, actualT)
+				}
+			}
+		}
+
 	}
 
 	// Check that all arguments and return values of detected Temporal.io
@@ -159,4 +242,23 @@ func identifyCalls(pass *analysis.Pass) []TemporalCall {
 		})
 	}
 	return calls
+}
+
+func numberToOrdinal(n int) string {
+	if n <= 0 {
+		return "0"
+	}
+	if n%100 >= 11 && n%100 <= 13 {
+		return fmt.Sprintf("%dth", n)
+	}
+	switch n % 10 {
+	case 1:
+		return fmt.Sprintf("%dst", n)
+	case 2:
+		return fmt.Sprintf("%dnd", n)
+	case 3:
+		return fmt.Sprintf("%drd", n)
+	default:
+		return fmt.Sprintf("%dth", n)
+	}
 }

@@ -2,6 +2,8 @@ package test
 
 import (
 	"context"
+	"errors"
+	"strings"
 
 	"go.temporal.io/sdk/client"
 	worker "go.temporal.io/sdk/worker"
@@ -32,6 +34,7 @@ func Main() {
 	if err != nil {
 		panic(err)
 	}
+
 	// wait for the workflow to complete
 	err = executeWorkflow.Get(context.Background(), nil)
 	if err != nil {
@@ -41,14 +44,25 @@ func Main() {
 
 func HelloWorldWorkflow(ctx workflow.Context, name string) (string, error) {
 	var result string
-	err := workflow.ExecuteActivity(ctx, HelloWorldActivity, name).Get(ctx, &result)
-	if err != nil {
-		return "", err
-	}
+	var errList []error
+
+	// call the activity (plain function, string input)
+	errList = append(errList, workflow.ExecuteActivity(ctx, HelloWorldActivity, name).Get(ctx, &result))
 
 	var act *SophisticatedHelloWorldActivity
-	err = workflow.ExecuteActivity(ctx, act.Greet2, Greet2Param{name: name}).Get(ctx, &result)
-	return result, err
+	// call the activity (struct with method, string input)
+	errList = append(errList, workflow.ExecuteActivity(ctx, act.Greet, name).Get(ctx, &result))
+
+	// now mis-call the activity passing an int instead of a struct
+	errList = append(errList, workflow.ExecuteActivity(ctx, act.Greet2, 42).Get(ctx, &result))
+
+	// too many arguments
+	errList = append(errList, workflow.ExecuteActivity(ctx, act.Greet, name, "extra").Get(ctx, &result))
+
+	// too few arguments
+	errList = append(errList, workflow.ExecuteActivity(ctx, act.Greet).Get(ctx, &result))
+
+	return result, errors.Join(errList...)
 }
 
 func HelloWorldActivity(ctx context.Context, name string) (string, error) {
@@ -67,4 +81,8 @@ type Greet2Param struct {
 
 func (s *SophisticatedHelloWorldActivity) Greet2(ctx context.Context, param Greet2Param) (string, error) {
 	return "Hello " + param.name, nil
+}
+
+func HelloVariadic(ctx context.Context, sep string, names ...string) (string, error) {
+	return "Hello " + strings.Join(names, sep), nil
 }
