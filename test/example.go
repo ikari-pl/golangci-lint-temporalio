@@ -62,6 +62,10 @@ func HelloWorldWorkflow(ctx workflow.Context, name string) (string, error) {
 	// too few arguments
 	errList = append(errList, workflow.ExecuteActivity(ctx, act.Greet).Get(ctx, &result))
 
+	// calling a variadic string function, but mixing one float into the variadic list
+	errList = append(errList, workflow.ExecuteActivity(ctx, HelloVariadic,
+		",", "a", "b", "c", "d", 1.1, "e", "f").Get(ctx, &result))
+
 	return result, errors.Join(errList...)
 }
 

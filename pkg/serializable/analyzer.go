@@ -94,11 +94,11 @@ func run(pass *analysis.Pass) (interface{}, error) {
 						f := s.Field(i)
 						if len(f.Name()) > 0 && unicode.IsLower(rune(f.Name()[0])) {
 							pass.Reportf(c.Pos, "Field `%s` of `%s` is not exported - it will not "+
-								"be visible on the receiving end, and will assume its zero value", f.Name(), c.Callee.Name())
+									"be visible on the receiving end, and will assume its zero value", f.Name(), c.Callee.Name())
 						}
 						if !asttools.IsSerializable(f.Type()) {
 							pass.Reportf(c.Pos, "Field `%s` of `%s` is not serializable - it will not "+
-								"be visible on the receiving end, and will assume its zero value", f.Name(), c.Callee.Name())
+									"be visible on the receiving end, and will assume its zero value", f.Name(), c.Callee.Name())
 						}
 					}
 				}
@@ -126,13 +126,26 @@ func run(pass *analysis.Pass) (interface{}, error) {
 					pass.Reportf(c.Pos, "Too few arguments to `%s` - expected %d, got %d", callee.Name(),
 						expectedParams, len(callArgs))
 				}
+			} else {
+				// for variadic, we can only check if the number of arguments is at least the number of non-variadic parameters
+				if len(callArgs) < signature.Params().Len()-1 {
+					pass.Reportf(c.Pos, "Too few arguments to `%s` - expected at least %d, got %d", callee.Name(),
+						signature.Params().Len()-1, len(callArgs))
+				}
 			}
 
 			for argIdx := range argsCount {
 				var expectedT, actualT types.Type
-				// expected args start with a context, that is not included in the call arguments
-				if argIdx < signature.Params().Len()-1 {
-					expectedT = signature.Params().At(argIdx + 1).Type()
+				// Notes:
+				// - expected args start with a context, that is not included in the call arguments
+				// - for variadic functions, we need to compare the type of the variadic parameter ([]T)
+				//   with the type of all trailing arguments (T)
+				if signature.Variadic() && argIdx >= expectedParams-1 {
+					expectedT = signature.Params().At(signature.Params().Len() - 1).Type().(*types.Slice).Elem()
+				} else {
+					if argIdx < signature.Params().Len()-1 {
+						expectedT = signature.Params().At(argIdx + 1).Type()
+					}
 				}
 				if argIdx < len(callArgs) {
 					actualT = pass.TypesInfo.TypeOf(callArgs[argIdx])
@@ -143,18 +156,11 @@ func run(pass *analysis.Pass) (interface{}, error) {
 				if !types.Identical(expectedT, actualT) {
 					ordinal := numberToOrdinal(argIdx + 1)
 					pass.Reportf(c.Pos, "Type of %s argument to `%s` does not match the type of the workflow/activity\n"+
-						"\tExpected: %s,\n\t     got: %s", ordinal, callee.Name(), expectedT, actualT)
+							"\tExpected: %s,\n\t     got: %s", ordinal, callee.Name(), expectedT, actualT)
 				}
 			}
 		}
-
 	}
-
-	// Check that all arguments and return values of detected Temporal.io
-	// workflows and activities contain serializable fields only.
-
-	// Report any violations found
-
 	return nil, nil
 }
 
