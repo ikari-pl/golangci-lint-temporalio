@@ -8,12 +8,11 @@ import (
 	"go/types"
 	"unicode"
 
-	"github.com/spf13/pflag"
-	"golang.org/x/tools/go/analysis"
-
 	"github.com/ikari-pl/golangci-lint-temporalio/pkg/asttools"
 	"github.com/ikari-pl/golangci-lint-temporalio/pkg/callables"
-	"github.com/ikari-pl/golangci-lint-temporalio/pkg/externalDeps"
+	"github.com/ikari-pl/golangci-lint-temporalio/pkg/external"
+	"github.com/spf13/pflag"
+	"golang.org/x/tools/go/analysis"
 )
 
 var Analyzer = &analysis.Analyzer{
@@ -27,15 +26,20 @@ var Analyzer = &analysis.Analyzer{
 }
 
 func init() {
-	Analyzer.Flags.BoolVar(&debug, "debug-serializable", false, "Enable debug mode")
-	Analyzer.Flags.BoolVar(&reportUnresolved, "report-unresolved", false, "Report unresolved workflow/activity names")
-	Analyzer.Flags.BoolVar(&strictPointerMatch, "strict-pointer-match", false, "Require pointer types to match exactly, otherwise pointer vs underlying type is considered a match")
+	Analyzer.Flags.BoolVar(&debug, "debug-serializable", false,
+		"Enable debug mode")
+	Analyzer.Flags.BoolVar(&reportUnresolved, "report-unresolved", false,
+		"Report unresolved workflow/activity names")
+	Analyzer.Flags.BoolVar(&strictPointerMatch, "strict-pointer-match", false,
+		"Require pointer types to match exactly, otherwise pointer vs underlying type is considered a match")
 	pflag.CommandLine.AddGoFlagSet(&Analyzer.Flags)
 }
 
-var debug bool
-var reportUnresolved bool
-var strictPointerMatch bool
+var (
+	debug              bool
+	reportUnresolved   bool
+	strictPointerMatch bool
+)
 
 func run(pass *analysis.Pass) (interface{}, error) {
 	if debug {
@@ -52,8 +56,8 @@ func run(pass *analysis.Pass) (interface{}, error) {
 	// get all places where we call a workflow or an activity
 	calls := identifyCalls(pass)
 	for _, c := range calls {
-		isWorkflow := c.CallName == "ExecuteWorkflow"
-		isActivity := c.CallName == "ExecuteActivity"
+		isWorkflow := c.CallName == external.ExecuteWorkflow
+		isActivity := c.CallName == external.ExecuteActivity
 		var callArgs []ast.Expr
 		if isWorkflow {
 			callArgs = c.Expr.Args[1:]
@@ -72,18 +76,19 @@ func run(pass *analysis.Pass) (interface{}, error) {
 			// we may not know the type, let's see if it's called by name
 			// if it's called by name, we can look it up in the package
 			// if it's not, we can't do anything
-			if c.Expr.Args[caleePos].(*ast.BasicLit).Kind == token.STRING {
+			bLit, isBasicLit := c.Expr.Args[caleePos].(*ast.BasicLit)
+			if isBasicLit && bLit.Kind == token.STRING {
 				// we have a string literal, we can look it up
 				for _, o := range thisPkg.Workflows {
-					if o.Name() == c.Expr.Args[caleePos].(*ast.BasicLit).Value {
+					if o.Name() == bLit.Value {
 						callee = o
 						break
 					}
 				}
-				if callee == nil && reportUnresolved {
-					// can we make it a warning?
-					pass.Reportf(c.Pos, "Could not resolve the type of the workflow/activity")
-				}
+			}
+			if callee == nil && reportUnresolved {
+				// can we make it a warning?
+				pass.Reportf(c.Pos, "Could not resolve the type of the workflow/activity")
 			}
 		}
 
@@ -98,7 +103,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		// additionally, check if the type of the argument matches the argument type of the workflow/activity
 		if callee != nil {
 			signature := callee.Type().(*types.Signature)
-			checkArgumentCount(pass, c.Pos, callee.Name(), signature, callArgs, thisPkg)
+			checkArgumentCount(pass, c.Pos, callee.Name(), signature, callArgs)
 			checkArgumentTypes(pass, c.Pos, callee.Name(), signature, callArgs)
 
 			fmt.Printf("Call to %s at %s\n", c.Callee.Name(), pass.Fset.Position(c.Pos))
@@ -173,7 +178,12 @@ func checkArgumentTypes(pass *analysis.Pass, pos token.Pos, callee string, signa
 	}
 }
 
-func checkArgumentCount(pass *analysis.Pass, pos token.Pos, calleeName string, signature *types.Signature, callArgs []ast.Expr, pkg callables.Callables) {
+func checkArgumentCount(pass *analysis.Pass,
+	pos token.Pos,
+	calleeName string,
+	signature *types.Signature,
+	callArgs []ast.Expr,
+) {
 	expectedParams := signature.Params().Len() - 1
 	if !signature.Variadic() {
 		// for non variadic, we can check if the number of arguments is correct
@@ -185,12 +195,10 @@ func checkArgumentCount(pass *analysis.Pass, pos token.Pos, calleeName string, s
 			pass.Reportf(pos, "Too few arguments to `%s` - expected %d, got %d", calleeName,
 				expectedParams, len(callArgs))
 		}
-	} else {
+	} else if len(callArgs) < signature.Params().Len()-1 {
 		// for variadic, we can only check if the number of arguments is at least the number of non-variadic parameters
-		if len(callArgs) < signature.Params().Len()-1 {
-			pass.Reportf(pos, "Too few arguments to `%s` - expected at least %d, got %d", calleeName,
-				signature.Params().Len()-1, len(callArgs))
-		}
+		pass.Reportf(pos, "Too few arguments to `%s` - expected at least %d, got %d", calleeName,
+			signature.Params().Len()-1, len(callArgs))
 	}
 }
 
@@ -215,7 +223,7 @@ func identifyCalls(pass *analysis.Pass) []TemporalCall {
 			if !ok {
 				return true
 			}
-			if selector.Sel.Name != "ExecuteWorkflow" && selector.Sel.Name != "ExecuteActivity" {
+			if selector.Sel.Name != external.ExecuteWorkflow && selector.Sel.Name != external.ExecuteActivity {
 				return true
 			}
 			x, ok := selector.X.(*ast.Ident)
@@ -231,10 +239,10 @@ func identifyCalls(pass *analysis.Pass) []TemporalCall {
 				panic("not enough arguments to be a valid ExecuteWorkflow/Activity call")
 			}
 			xType := pass.TypesInfo.TypeOf(x)
-			if xType != nil && xType.String() == externalDeps.ClientType {
+			if xType != nil && xType.String() == external.ClientType {
 				callee := call.Args[2]
-				calleeId := asttools.IdentifierOf(callee)
-				caleeObj := pass.TypesInfo.ObjectOf(calleeId)
+				calleeID := asttools.IdentifierOf(callee)
+				caleeObj := pass.TypesInfo.ObjectOf(calleeID)
 
 				calls = append(calls, TemporalCall{
 					Pos:      call.Pos(),
@@ -260,9 +268,9 @@ func identifyCalls(pass *analysis.Pass) []TemporalCall {
 				return true
 			}
 			// check if the package name is "go.temporal.io/sdk/workflow"
-			if p.Imported().Path() == externalDeps.WorkflowPkg {
+			if p.Imported().Path() == external.WorkflowPkg {
 				callee := call.Args[1]
-				var calleeId *ast.Ident
+				var calleeID *ast.Ident
 				var caleeObj types.Object
 				// if we expect the calee to be identified by a string literal
 				if pass.TypesInfo.TypeOf(callee).String() == "string" {
@@ -286,8 +294,8 @@ func identifyCalls(pass *analysis.Pass) []TemporalCall {
 						return true // not much we can do
 					}
 				}
-				calleeId = asttools.IdentifierOf(callee)
-				caleeObj = pass.TypesInfo.ObjectOf(calleeId)
+				calleeID = asttools.IdentifierOf(callee)
+				caleeObj = pass.TypesInfo.ObjectOf(calleeID)
 
 				calls = append(calls, TemporalCall{
 					Pos:      call.Pos(),
