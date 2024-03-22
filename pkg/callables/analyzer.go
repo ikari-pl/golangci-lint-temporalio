@@ -77,6 +77,31 @@ func identifyCallable(pass *analysis.Pass) (workflows, activities []types.Object
 								firstArgObj := pass.TypesInfo.ObjectOf(asttools.IdentifierOf(callExpr.Args[0]))
 								knownWorkflows = append(knownWorkflows, firstArgObj)
 							}
+							// you can also register an activity under the name of your choice with RegisterActivityWithOptions
+							if selector.Sel.Name == "RegisterActivityWithOptions" {
+								firstArgObj := pass.TypesInfo.ObjectOf(asttools.IdentifierOf(callExpr.Args[0]))
+								optionsArgObj := asttools.IdentifierOf(callExpr.Args[1])
+								// optionsArgObj is a struct of type worker.RegisterActivityOptions,
+								// let's check if it has a Name field
+								if optionsArgObj != nil {
+									if optionsType, ok := pass.TypesInfo.Types[callExpr.Args[1]]; ok {
+										if optionsType.Type.String() == "go.temporal.io/sdk/worker.RegisterActivityOptions" {
+											t := optionsType.Type.Underlying().(*types.Struct)
+											for i := range t.NumFields() {
+												field := t.Field(i)
+												if field.Name() == "Name" {
+													altObj := types.NewFunc(firstArgObj.Pos(), firstArgObj.Pkg(), field.String(), firstArgObj.Type().(*types.Signature))
+													knownActivities = append(knownActivities, altObj)
+													fmt.Printf("Found an alternative name for activity: %s\n", altObj.Name())
+													break
+												}
+											}
+										}
+									}
+								}
+
+								knownActivities = append(knownActivities, firstArgObj)
+							}
 						}
 					}
 					if isDebug() {

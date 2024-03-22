@@ -66,6 +66,12 @@ func HelloWorldWorkflow(ctx workflow.Context, name string) (string, error) {
 	errList = append(errList, workflow.ExecuteActivity(ctx, HelloVariadic,
 		",", "a", "b", "c", "d", 1.1, "e", "f").Get(ctx, &result))
 
+	// correct, resolved by activity name
+	errList = append(errList, workflow.ExecuteActivity(ctx, "HelloWorldActivity", name).Get(ctx, &result))
+
+	// incorrect, resolved by activity name, too many arguments
+	errList = append(errList, workflow.ExecuteActivity(ctx, "HelloWorldActivity", name, "extra").Get(ctx, &result))
+
 	return result, errors.Join(errList...)
 }
 
