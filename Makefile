@@ -10,11 +10,7 @@ format: $(GOFUMPT)
 	$(GOFUMPT) -w .
 
 build:
-	go build -o bin/golangci-lint-temporalio cmd/golangci-lint-temporalio/main.go
+	go build
 
-run:
-	go run cmd/golangci-lint-temporalio/main.go
-
-check:
-	go run cmd/golangci-lint-temporalio/main.go -- ./test/example.go
-
+demo:
+	go run main.go -- ./test/example.go
