@@ -106,10 +106,14 @@ func run(pass *analysis.Pass) (interface{}, error) {
 			checkArgumentCount(pass, c.Pos, callee.Name(), signature, callArgs)
 			checkArgumentTypes(pass, c.Pos, callee.Name(), signature, callArgs)
 
-			fmt.Printf("Call to %s at %s\n", c.Callee.Name(), pass.Fset.Position(c.Pos))
+			if debug {
+				fmt.Printf("Call to %s at %s\n", c.Callee.Name(), pass.Fset.Position(c.Pos))
+			}
 		}
 	}
-	fmt.Printf("%d calls to workflows/activities checked\n", len(calls))
+	if debug {
+		fmt.Printf("%d calls to workflows/activities checked\n", len(calls))
+	}
 	return nil, nil
 }
 
