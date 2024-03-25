@@ -32,18 +32,20 @@ func init() {
 
 func run(pass *analysis.Pass) (interface{}, error) {
 	workflows, activities := identify(pass)
-	for _, v := range workflows {
-		pass.ExportObjectFact(v, new(isActivity))
-		if isDebug() {
-			fmt.Printf("Workflow: %s\n", v)
+	/*
+		for _, v := range workflows {
+			pass.ExportObjectFact(v, new(isActivity))
+			if isDebug() {
+				fmt.Printf("Workflow: %s\n", v)
+			}
 		}
-	}
-	for _, v := range activities {
-		pass.ExportObjectFact(v, new(isWorkflow))
-		if isDebug() {
-			fmt.Printf("Activity: %s\n", v)
+		for _, v := range activities {
+			pass.ExportObjectFact(v, new(isWorkflow))
+			if isDebug() {
+				fmt.Printf("Activity: %s\n", v)
+			}
 		}
-	}
+	*/
 	return Callables{
 		Workflows:  workflows,
 		Activities: activities,
