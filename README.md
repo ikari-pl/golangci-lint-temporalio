@@ -12,7 +12,11 @@ it hard to find the bug.
 ## Features
 
 * Checks for correct argument types and counts in workflow and activity calls.
-* Validates that all fields in structs passed to workflows and activities are exported and serializable.  
+* Validates that all fields in structs passed to workflows and activities are exported and serializable.
+  - [x] Checks struct types for being public in arguments
+  - [ ] Checks struct types for being public in return values
+  - [ ] Checks that the type itself is exported
+
 * Supports variadic arguments in workflow and activity calls.
 
 ## Installation
