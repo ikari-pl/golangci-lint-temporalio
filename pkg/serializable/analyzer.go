@@ -107,15 +107,19 @@ func run(pass *analysis.Pass) (interface{}, error) {
 
 func checkStructArg(pass *analysis.Pass, c TemporalCall, actualT types.Type) {
 	if s, ok := actualT.Underlying().(*types.Struct); ok {
+		calleName := ""
+		if c.Callee != nil {
+			calleName = c.Callee.Name()
+		}
 		for i := 0; i < s.NumFields(); i++ {
 			f := s.Field(i)
 			if len(f.Name()) > 0 && unicode.IsLower(rune(f.Name()[0])) {
 				pass.Reportf(c.Pos, "Field `%s` of `%s` is not exported - it will not "+
-					"be visible on the receiving end, and will assume its zero value", f.Name(), c.Callee.Name())
+					"be visible to `%s`, and will assume its zero value", f.Name(), f.Type().String(), calleName)
 			}
 			if !asttools.IsSerializable(f.Type()) {
 				pass.Reportf(c.Pos, "Field `%s` of `%s` is not serializable - it will not "+
-					"be visible on the receiving end, and will assume its zero value", f.Name(), c.Callee.Name())
+					"be visible to `%s`, and will assume its zero value", f.Name(), f.Type().String(), calleName)
 			}
 		}
 	}
@@ -253,7 +257,8 @@ func identifyCalls(pass *analysis.Pass) []TemporalCall {
 					CallName: selector.Sel.Name,
 					Expr:     call,
 					Callee:   caleeObj,
-					CallArgs: call.Args[1:],
+					// skip the first two arguments (context, start options, and the callee)
+					CallArgs: call.Args[3:],
 					Type:     Workflow,
 				})
 				return true
@@ -309,6 +314,7 @@ func identifyCalls(pass *analysis.Pass) []TemporalCall {
 					CallName: selector.Sel.Name,
 					Expr:     call,
 					Callee:   caleeObj,
+					// skip the first two arguments (context, and the callee)
 					CallArgs: call.Args[2:],
 					Type:     Activity,
 				})

@@ -30,7 +30,7 @@ func Main() {
 	tWorker.RegisterActivity(&SophisticatedHelloWorldActivity{})
 
 	// start a workflow
-	executeWorkflow, err := temporalClient.ExecuteWorkflow(context.Background(), client.StartWorkflowOptions{}, "World")
+	executeWorkflow, err := temporalClient.ExecuteWorkflow(context.Background(), client.StartWorkflowOptions{}, HelloWorldWorkflow, "World")
 	if err != nil {
 		panic(err)
 	}
