@@ -56,21 +56,10 @@ func run(pass *analysis.Pass) (interface{}, error) {
 	// get all places where we call a workflow or an activity
 	calls := identifyCalls(pass)
 	for _, c := range calls {
-		isWorkflow := c.CallName == external.ExecuteWorkflow
-		isActivity := c.CallName == external.ExecuteActivity
-		var callArgs []ast.Expr
-		if isWorkflow {
-			callArgs = c.Expr.Args[1:]
-		} else if isActivity {
-			callArgs = c.Expr.Args[2:]
-		} else {
-			// we need to support more calls
-			panic("unknown call type " + c.CallName)
-		}
 		callee := c.Callee
-		if c.Callee == nil {
-			caleePos := 2 // default to workflow identifier
-			if c.CallName == "ExecuteActivity" {
+		if callee == nil {
+			caleePos := 2 // default to workflow identifier position in the call
+			if c.Type == Activity {
 				caleePos = 1
 			}
 			// we may not know the type, let's see if it's called by name
@@ -91,8 +80,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 				pass.Reportf(c.Pos, "Could not resolve the type of the workflow/activity")
 			}
 		}
-
-		for _, callArg := range callArgs {
+		for _, callArg := range c.CallArgs {
 			actualT := pass.TypesInfo.TypeOf(callArg)
 			// if actualT is a struct, or a pointer to a struct, check if it's serializable
 			if actualT != nil {
@@ -103,8 +91,8 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		// additionally, check if the type of the argument matches the argument type of the workflow/activity
 		if callee != nil {
 			signature := callee.Type().(*types.Signature)
-			checkArgumentCount(pass, c.Pos, callee.Name(), signature, callArgs)
-			checkArgumentTypes(pass, c.Pos, callee.Name(), signature, callArgs)
+			checkArgumentCount(pass, c.Pos, callee.Name(), signature, c.CallArgs)
+			checkArgumentTypes(pass, c.Pos, callee.Name(), signature, c.CallArgs)
 
 			if debug {
 				fmt.Printf("Call to %s at %s\n", c.Callee.Name(), pass.Fset.Position(c.Pos))
@@ -212,8 +200,19 @@ type TemporalCall struct {
 	FileName string
 	CallName string
 	Expr     *ast.CallExpr
+
+	Type     TemporalIoCallType
 	Callee   types.Object
+	CallArgs []ast.Expr
 }
+
+type TemporalIoCallType int
+
+const (
+	NotSupported TemporalIoCallType = iota
+	Workflow
+	Activity
+)
 
 func identifyCalls(pass *analysis.Pass) []TemporalCall {
 	var calls []TemporalCall
@@ -254,7 +253,10 @@ func identifyCalls(pass *analysis.Pass) []TemporalCall {
 					CallName: selector.Sel.Name,
 					Expr:     call,
 					Callee:   caleeObj,
+					CallArgs: call.Args[1:],
+					Type:     Workflow,
 				})
+				return true
 			}
 
 			// get the scope at call.Pos()
@@ -307,6 +309,8 @@ func identifyCalls(pass *analysis.Pass) []TemporalCall {
 					CallName: selector.Sel.Name,
 					Expr:     call,
 					Callee:   caleeObj,
+					CallArgs: call.Args[2:],
+					Type:     Activity,
 				})
 			}
 
