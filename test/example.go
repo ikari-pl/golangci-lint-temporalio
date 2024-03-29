@@ -26,11 +26,21 @@ func Main() {
 	// register an activity that's a plain function
 	tWorker.RegisterActivity(HelloWorldActivity)
 
+	// wrong registration, the activity is registered as a workflow
+	tWorker.RegisterWorkflow(HelloWorldActivity)
+
+	// or the other way around
+	tWorker.RegisterActivity(HelloWorldWorkflow)
+
 	// and an activity that's a struct with a method
 	tWorker.RegisterActivity(&SophisticatedHelloWorldActivity{})
 
 	// start a workflow
-	executeWorkflow, err := temporalClient.ExecuteWorkflow(context.Background(), client.StartWorkflowOptions{}, HelloWorldWorkflow, "World")
+	executeWorkflow, err := temporalClient.ExecuteWorkflow(
+		context.Background(),
+		client.StartWorkflowOptions{},
+		HelloWorldWorkflow,
+		"World")
 	if err != nil {
 		panic(err)
 	}
@@ -55,6 +65,9 @@ func HelloWorldWorkflow(ctx workflow.Context, name string) (string, error) {
 
 	// now mis-call the activity passing an int instead of a struct
 	errList = append(errList, workflow.ExecuteActivity(ctx, act.Greet2, 42).Get(ctx, &result))
+
+	// a nil pointer to a struct can be untyped and it's "fine"
+	errList = append(errList, workflow.ExecuteActivity(ctx, act.Greet2, nil).Get(ctx, &result))
 
 	// too many arguments
 	errList = append(errList, workflow.ExecuteActivity(ctx, act.Greet, name, "extra").Get(ctx, &result))

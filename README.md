@@ -11,6 +11,8 @@ it hard to find the bug.
 
 ## Features
 
+* Checks if `RegisterWorkflow` is called with a function that looks like a workflow (has `workflow.Context` as first argument)
+* Checks if `RegisterActivity`, if called with a function, is called with a function that looks like an activity (has `context.Context` as first argument)
 * Checks for correct argument types and counts in workflow and activity calls.
 * Validates that all fields in structs passed to workflows and activities are exported and serializable.
   - [x] Checks struct types for being public in arguments

@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
-	"go/types"
+	goTypes "go/types"
 	"unicode"
 
-	"github.com/ikari-pl/golangci-lint-temporalio/pkg/asttools"
 	"github.com/ikari-pl/golangci-lint-temporalio/pkg/callables"
 	"github.com/ikari-pl/golangci-lint-temporalio/pkg/external"
+	"github.com/ikari-pl/golangci-lint-temporalio/pkg/internal/asttools"
+	"github.com/ikari-pl/golangci-lint-temporalio/pkg/internal/types"
 	"github.com/spf13/pflag"
 	"golang.org/x/tools/go/analysis"
 )
@@ -59,7 +60,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		callee := c.Callee
 		if callee == nil {
 			caleePos := 2 // default to workflow identifier position in the call
-			if c.Type == Activity {
+			if c.Type == types.Activity {
 				caleePos = 1
 			}
 			// we may not know the type, let's see if it's called by name
@@ -90,7 +91,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 
 		// additionally, check if the type of the argument matches the argument type of the workflow/activity
 		if callee != nil {
-			signature := callee.Type().(*types.Signature)
+			signature := callee.Type().(*goTypes.Signature)
 			checkArgumentCount(pass, c.Pos, callee.Name(), signature, c.CallArgs)
 			checkArgumentTypes(pass, c.Pos, callee.Name(), signature, c.CallArgs)
 
@@ -105,8 +106,8 @@ func run(pass *analysis.Pass) (interface{}, error) {
 	return nil, nil
 }
 
-func checkStructArg(pass *analysis.Pass, c TemporalCall, actualT types.Type) {
-	if s, ok := actualT.Underlying().(*types.Struct); ok {
+func checkStructArg(pass *analysis.Pass, c types.TemporalCall, actualT goTypes.Type) {
+	if s, ok := actualT.Underlying().(*goTypes.Struct); ok {
 		calleName := ""
 		if c.Callee != nil {
 			calleName = c.Callee.Name()
@@ -125,7 +126,7 @@ func checkStructArg(pass *analysis.Pass, c TemporalCall, actualT types.Type) {
 	}
 }
 
-func checkArgumentTypes(pass *analysis.Pass, pos token.Pos, callee string, signature *types.Signature, callArgs []ast.Expr) {
+func checkArgumentTypes(pass *analysis.Pass, pos token.Pos, callee string, signature *goTypes.Signature, callArgs []ast.Expr) {
 	expectedParams := signature.Params().Len() - 1
 	// we are going to check up to the maximum of expected and actual arguments
 	argsCount := max(expectedParams, len(callArgs))
@@ -134,13 +135,13 @@ func checkArgumentTypes(pass *analysis.Pass, pos token.Pos, callee string, signa
 		argsCount = max(signature.Params().Len()-1, len(callArgs))
 	}
 	for argIdx := range argsCount {
-		var expectedT, actualT types.Type
+		var expectedT, actualT goTypes.Type
 		// Notes:
 		// - expected args start with a context, that is not included in the call arguments
 		// - for variadic functions, we need to compare the type of the variadic parameter ([]T)
 		//   with the type of all trailing arguments (T)
 		if signature.Variadic() && argIdx >= expectedParams-1 {
-			expectedT = signature.Params().At(signature.Params().Len() - 1).Type().(*types.Slice).Elem()
+			expectedT = signature.Params().At(signature.Params().Len() - 1).Type().(*goTypes.Slice).Elem()
 		} else {
 			if argIdx < signature.Params().Len()-1 {
 				expectedT = signature.Params().At(argIdx + 1).Type()
@@ -152,16 +153,22 @@ func checkArgumentTypes(pass *analysis.Pass, pos token.Pos, callee string, signa
 		if expectedT == nil || actualT == nil {
 			continue
 		}
-		if !types.Identical(expectedT, actualT) {
+		if !goTypes.Identical(expectedT, actualT) {
 			// is it a pointer vs non-pointer mismatch? (temporal handles these)
 			if !strictPointerMatch {
-				if ptr, ok := expectedT.(*types.Pointer); ok {
-					if types.Identical(ptr.Elem(), actualT) {
+				if ptr, ok := expectedT.(*goTypes.Pointer); ok {
+					if goTypes.Identical(ptr.Elem(), actualT) {
 						continue
 					}
 				}
-				if ptr, ok := actualT.(*types.Pointer); ok {
-					if types.Identical(ptr.Elem(), expectedT) {
+				if ptr, ok := actualT.(*goTypes.Pointer); ok {
+					if goTypes.Identical(ptr.Elem(), expectedT) {
+						continue
+					}
+				}
+				// and if expected type is a struct or a pointer to a struct, and actual is untyped nil, it's fine
+				if _, ok := expectedT.Underlying().(*goTypes.Struct); ok {
+					if actualT == goTypes.Typ[goTypes.UntypedNil] {
 						continue
 					}
 				}
@@ -177,7 +184,7 @@ func checkArgumentTypes(pass *analysis.Pass, pos token.Pos, callee string, signa
 func checkArgumentCount(pass *analysis.Pass,
 	pos token.Pos,
 	calleeName string,
-	signature *types.Signature,
+	signature *goTypes.Signature,
 	callArgs []ast.Expr,
 ) {
 	expectedParams := signature.Params().Len() - 1
@@ -198,28 +205,8 @@ func checkArgumentCount(pass *analysis.Pass,
 	}
 }
 
-// TemporalCall represents a detected Temporal.io workflow or activity invocation.
-type TemporalCall struct {
-	Pos      token.Pos
-	FileName string
-	CallName string
-	Expr     *ast.CallExpr
-
-	Type     TemporalIoCallType
-	Callee   types.Object
-	CallArgs []ast.Expr
-}
-
-type TemporalIoCallType int
-
-const (
-	NotSupported TemporalIoCallType = iota
-	Workflow
-	Activity
-)
-
-func identifyCalls(pass *analysis.Pass) []TemporalCall {
-	var calls []TemporalCall
+func identifyCalls(pass *analysis.Pass) []types.TemporalCall {
+	var calls []types.TemporalCall
 	for _, f := range pass.Files {
 		ast.Inspect(f, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
@@ -251,7 +238,7 @@ func identifyCalls(pass *analysis.Pass) []TemporalCall {
 				calleeID := asttools.IdentifierOf(callee)
 				caleeObj := pass.TypesInfo.ObjectOf(calleeID)
 
-				calls = append(calls, TemporalCall{
+				calls = append(calls, types.TemporalCall{
 					Pos:      call.Pos(),
 					FileName: pass.Fset.Position(call.Pos()).Filename,
 					CallName: selector.Sel.Name,
@@ -259,7 +246,7 @@ func identifyCalls(pass *analysis.Pass) []TemporalCall {
 					Callee:   caleeObj,
 					// skip the first two arguments (context, start options, and the callee)
 					CallArgs: call.Args[3:],
-					Type:     Workflow,
+					Type:     types.Workflow,
 				})
 				return true
 			}
@@ -274,7 +261,7 @@ func identifyCalls(pass *analysis.Pass) []TemporalCall {
 				return true
 			}
 			// get the package name from the scope if o is a *types.PkgName
-			p, ok := o.(*types.PkgName)
+			p, ok := o.(*goTypes.PkgName)
 			if !ok {
 				return true
 			}
@@ -282,7 +269,7 @@ func identifyCalls(pass *analysis.Pass) []TemporalCall {
 			if p.Imported().Path() == external.WorkflowPkg {
 				callee := call.Args[1]
 				var calleeID *ast.Ident
-				var caleeObj types.Object
+				var caleeObj goTypes.Object
 				// if we expect the calee to be identified by a string literal
 				if pass.TypesInfo.TypeOf(callee).String() == "string" {
 					// if we have a string literal, we can look it up
@@ -308,7 +295,7 @@ func identifyCalls(pass *analysis.Pass) []TemporalCall {
 				calleeID = asttools.IdentifierOf(callee)
 				caleeObj = pass.TypesInfo.ObjectOf(calleeID)
 
-				calls = append(calls, TemporalCall{
+				calls = append(calls, types.TemporalCall{
 					Pos:      call.Pos(),
 					FileName: pass.Fset.Position(call.Pos()).Filename,
 					CallName: selector.Sel.Name,
@@ -316,7 +303,7 @@ func identifyCalls(pass *analysis.Pass) []TemporalCall {
 					Callee:   caleeObj,
 					// skip the first two arguments (context, and the callee)
 					CallArgs: call.Args[2:],
-					Type:     Activity,
+					Type:     types.Activity,
 				})
 			}
 
