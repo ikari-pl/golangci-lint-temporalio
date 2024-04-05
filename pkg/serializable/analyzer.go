@@ -119,8 +119,9 @@ func checkStructArg(pass *analysis.Pass, c types.TemporalCall, actualT goTypes.T
 					"be visible to `%s`, and will assume its zero value", f.Name(), f.Type().String(), calleName)
 			}
 			if !asttools.IsSerializable(f.Type()) {
-				pass.Reportf(c.Pos, "Field `%s` of `%s` is not serializable - it will not "+
-					"be visible to `%s`, and will assume its zero value", f.Name(), f.Type().String(), calleName)
+				pass.Reportf(c.Pos, "Field `%s` (`%s`) of `%s` is not serializable - it will not "+
+					"be visible to `%s`, and will assume its zero value", f.Name(), f.Type().String(),
+					actualT.String(), calleName)
 			}
 		}
 	}

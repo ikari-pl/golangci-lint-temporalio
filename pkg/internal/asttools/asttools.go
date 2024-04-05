@@ -33,13 +33,16 @@ func IdentifierOf(e ast.Expr) *ast.Ident {
 }
 
 // IsSerializable returns true if the given type is serializable to JSON.
-// This is a very rough approximation,but it's good enough for our purposes.
+// This is a very rough approximation, but it's good enough for our purposes.
 func IsSerializable(t types.Type) bool {
 	// if the type has a custom Marshaler, it means the author of the type
 	// knows how to serialize it, so we assume it's serializable
 	ut := t.Underlying()
 	tt := reflect.TypeOf(ut)
 	if tt.Implements(reflect.TypeOf((*json.Marshaler)(nil)).Elem()) {
+		return true
+	}
+	if tt.Implements(reflect.TypeOf((json.Marshaler)(nil)).Elem()) {
 		return true
 	}
 
