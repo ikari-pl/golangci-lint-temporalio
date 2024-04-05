@@ -14,7 +14,7 @@ import (
 )
 
 var Analyzer = &analysis.Analyzer{
-	Name:       "TemporalioCallables",
+	Name:       "TemporalIoCallables",
 	Doc:        "Detects registrations of, and calls to Temporal.io workflows and activities",
 	Run:        run,
 	Flags:      tcFlags,
@@ -61,16 +61,23 @@ func export(pass *analysis.Pass, workflows []goTypes.Object, activities []goType
 	defer func() {
 		// bug: we panic sometimes, let's recover
 		if r := recover(); r != nil {
-			fmt.Printf("Recovered from panic: %v\n", r)
+			fmt.Printf("WARN: Recovered from panic: %v\n", r)
 		}
 	}()
 	for _, v := range workflows {
+		// make sure v belongs to the package we're analyzing
+		if v.Pkg() != pass.Pkg {
+			continue
+		}
 		pass.ExportObjectFact(v, new(isActivity))
 		if isDebug() {
 			fmt.Printf("Workflow: %s\n", v)
 		}
 	}
 	for _, v := range activities {
+		if v.Pkg() != pass.Pkg {
+			continue
+		}
 		pass.ExportObjectFact(v, new(isWorkflow))
 		if isDebug() {
 			fmt.Printf("Activity: %s\n", v)
@@ -119,13 +126,15 @@ func identify(pass *analysis.Pass) (workflows, activities []goTypes.Object, regi
 			}
 
 			// for now, we only verify the signatures we can resolve (functions, not their names, passed as arguments)
-			sig, isSig := pass.TypesInfo.TypeOf(callExpr.Args[0]).(*goTypes.Signature)
-			if isSig {
-				registerCalls = append(registerCalls, Registration{
-					Call:            *callExpr,
-					CalleeSignature: sig,
-					Type:            t,
-				})
+			if t != types.NotSupported {
+				sig, isSig := pass.TypesInfo.TypeOf(callExpr.Args[0]).(*goTypes.Signature)
+				if isSig {
+					registerCalls = append(registerCalls, Registration{
+						Call:            *callExpr,
+						CalleeSignature: sig,
+						Type:            t,
+					})
+				}
 			}
 			return true
 		})
