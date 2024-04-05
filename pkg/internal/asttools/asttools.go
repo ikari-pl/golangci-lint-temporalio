@@ -46,7 +46,10 @@ func IsSerializable(t types.Type) (bool, string) {
 		for i := 0; i < named.NumMethods(); i++ {
 			m := named.Method(i)
 			if m.Name() == "MarshalJSON" {
-				return true, ""
+				return true, "implements MarshalJSON"
+			}
+			if m.Name() == "ProtoMessage" {
+				return true, "is a protobuf message"
 			}
 		}
 	}
