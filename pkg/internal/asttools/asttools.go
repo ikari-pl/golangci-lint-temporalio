@@ -1,7 +1,6 @@
 package asttools
 
 import (
-	"encoding/json"
 	"go/ast"
 	"go/types"
 	"reflect"
@@ -37,13 +36,17 @@ func IdentifierOf(e ast.Expr) *ast.Ident {
 func IsSerializable(t types.Type) bool {
 	// if the type has a custom Marshaler, it means the author of the type
 	// knows how to serialize it, so we assume it's serializable
-	ut := t.Underlying()
-	tt := reflect.TypeOf(ut)
-	if tt.Implements(reflect.TypeOf((*json.Marshaler)(nil)).Elem()) {
-		return true
-	}
-	if tt.Implements(reflect.TypeOf((json.Marshaler)(nil)).Elem()) {
-		return true
+
+	// we cannot check if it implements Marshaler directly. It's from the `types` package,
+	// and not from reflect (it defines a type at compile time, not at runtime),
+	// so we have to check if it's a named type, and if it has a method called MarshalJSON
+	if named, ok := t.(*types.Named); ok {
+		for i := 0; i < named.NumMethods(); i++ {
+			m := named.Method(i)
+			if m.Name() == "MarshalJSON" {
+				return true
+			}
+		}
 	}
 
 	switch t := t.(type) {
@@ -72,6 +75,8 @@ func IsSerializable(t types.Type) bool {
 	case *types.Basic:
 		return true
 	case *types.Slice:
+		return IsSerializable(t.Elem())
+	case *types.Array:
 		return IsSerializable(t.Elem())
 	case *types.Map:
 		return IsSerializable(t.Key()) && IsSerializable(t.Elem())
