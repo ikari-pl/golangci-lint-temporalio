@@ -52,6 +52,7 @@ func TestIsSerializable(t *testing.T) {
 		types.Typ[types.Bool],
 		types.NewSlice(types.Typ[types.Int]),
 		types.NewArray(types.Typ[types.Int], 10),
+		types.NewArray(types.Typ[types.Byte], 16),
 		types.NewMap(types.Typ[types.String], types.Typ[types.Int]),
 		types.NewPointer(types.Typ[types.Int]),
 		timeType,
@@ -63,8 +64,8 @@ func TestIsSerializable(t *testing.T) {
 	}
 	for _, typ := range shouldBeTrue {
 		t.Run("serializable types: "+typ.String(), func(t *testing.T) {
-			if !IsSerializable(typ) {
-				t.Errorf("expected type %v to be serializable", typ)
+			if is, why := IsSerializable(typ); !is {
+				t.Errorf("expected type %v to be serializable, wasn't: %s", typ, why)
 			}
 		})
 	}
@@ -73,7 +74,7 @@ func TestIsSerializable(t *testing.T) {
 	}
 	for _, typ := range shouldBeFalse {
 		t.Run("non-serializable types: "+typ.String(), func(t *testing.T) {
-			if IsSerializable(typ) {
+			if is, _ := IsSerializable(typ); is {
 				t.Errorf("expected type %v to not be serializable", typ)
 			}
 		})

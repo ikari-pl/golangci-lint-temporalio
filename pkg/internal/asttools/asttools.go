@@ -1,6 +1,7 @@
 package asttools
 
 import (
+	"fmt"
 	"go/ast"
 	"go/types"
 	"reflect"
@@ -33,7 +34,8 @@ func IdentifierOf(e ast.Expr) *ast.Ident {
 
 // IsSerializable returns true if the given type is serializable to JSON.
 // This is a very rough approximation, but it's good enough for our purposes.
-func IsSerializable(t types.Type) bool {
+// Returns if the type is serializable, and if not, why.
+func IsSerializable(t types.Type) (bool, string) {
 	// if the type has a custom Marshaler, it means the author of the type
 	// knows how to serialize it, so we assume it's serializable
 
@@ -44,7 +46,7 @@ func IsSerializable(t types.Type) bool {
 		for i := 0; i < named.NumMethods(); i++ {
 			m := named.Method(i)
 			if m.Name() == "MarshalJSON" {
-				return true
+				return true, ""
 			}
 		}
 	}
@@ -53,8 +55,8 @@ func IsSerializable(t types.Type) bool {
 	case *types.Struct:
 		for i := 0; i < t.NumFields(); i++ {
 			f := t.Field(i)
-			if !IsSerializable(f.Type()) {
-				return false
+			if is, why := IsSerializable(f.Type()); !is {
+				return false, fmt.Sprintf("field %s (%s) is not serializable,\n\treason: %s", f.Name(), f.Type().String(), why)
 			}
 			// check if field serializes to json:
 			// get json tag, it can be something like `json:"name,omitempty"`
@@ -62,29 +64,39 @@ func IsSerializable(t types.Type) bool {
 			jsonTag := t.Get("json")
 			switch jsonTag {
 			case "-":
-				return false
+				return false, fmt.Sprintf("field %s is not serializable,\n\treason: field is marked with json:\"-\"", f.Name())
 			case "":
-				return ast.IsExported(f.Name()) && IsSerializable(f.Type())
+				if ast.IsExported(f.Name()) {
+					if is, why := IsSerializable(f.Type()); !is {
+						return false, fmt.Sprintf("field %s (%s) is not serializable,\n\treason: %s", f.Name(), f.Type().String(), why)
+					}
+					return true, ""
+				}
+				return false, fmt.Sprintf("field %s is not serializable,\n\treason: field is not exported", f.Name())
 			}
 		}
-		return true
+		return true, ""
 	case *types.Pointer:
 		return IsSerializable(t.Elem())
 	case *types.Named:
 		return IsSerializable(t.Underlying())
 	case *types.Basic:
-		return true
+		return true, ""
 	case *types.Slice:
 		return IsSerializable(t.Elem())
 	case *types.Array:
 		return IsSerializable(t.Elem())
 	case *types.Map:
-		return IsSerializable(t.Key()) && IsSerializable(t.Elem())
+		if is, why := IsSerializable(t.Key()); !is {
+			// ideally we should check if map key is a basic type, probably
+			return false, fmt.Sprintf("map key (%s) is not serializable,\n\treason: %s", t.Key().String(), why)
+		}
+		return IsSerializable(t.Elem())
 	case *types.Interface:
 		// if it's an interface, we can't know what it is, so make an optimistic assumption
-		return true
+		return true, ""
 	default:
 		// if we don't know what it is, assume it's not serializable
-		return false
+		return false, fmt.Sprintf("type %s is not serializable (most likely)", t.String())
 	}
 }
