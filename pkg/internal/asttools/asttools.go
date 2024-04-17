@@ -52,6 +52,8 @@ func IsSerializable(t types.Type) (bool, string) {
 				return true, "is a protobuf message"
 			}
 		}
+	} else if named, ok := t.Underlying().(*types.Named); ok {
+		return IsSerializable(named)
 	}
 
 	switch t := t.(type) {
