@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"go.temporal.io/sdk/client"
 	worker "go.temporal.io/sdk/worker"
@@ -71,6 +72,10 @@ func HelloWorldWorkflow(ctx workflow.Context, name string) (string, error) {
 
 	// too many arguments
 	errList = append(errList, workflow.ExecuteActivity(ctx, act.Greet, name, "extra").Get(ctx, &result))
+
+	// too many arguments, it's a time.Time that has all fields private, but implements MarshalJSON
+	ti := time.Now()
+	errList = append(errList, workflow.ExecuteActivity(ctx, act.Greet, name, ti).Get(ctx, &result))
 
 	// too few arguments
 	errList = append(errList, workflow.ExecuteActivity(ctx, act.Greet).Get(ctx, &result))

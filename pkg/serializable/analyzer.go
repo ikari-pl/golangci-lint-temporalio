@@ -6,7 +6,6 @@ import (
 	"go/ast"
 	"go/token"
 	goTypes "go/types"
-	"unicode"
 
 	"github.com/ikari-pl/golangci-lint-temporalio/pkg/callables"
 	"github.com/ikari-pl/golangci-lint-temporalio/pkg/external"
@@ -83,9 +82,10 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		}
 		for _, callArg := range c.CallArgs {
 			actualT := pass.TypesInfo.TypeOf(callArg)
-			// if actualT is a struct, or a pointer to a struct, check if it's serializable
 			if actualT != nil {
-				checkStructArg(pass, c, actualT)
+				// get argument name from callArg
+				// if it's a struct, check if all fields are exported
+				checkArgType(pass, c, actualT, callArg)
 			}
 		}
 
@@ -106,24 +106,21 @@ func run(pass *analysis.Pass) (interface{}, error) {
 	return nil, nil
 }
 
-func checkStructArg(pass *analysis.Pass, c types.TemporalCall, actualT goTypes.Type) {
-	if s, ok := actualT.Underlying().(*goTypes.Struct); ok {
+func checkArgType(pass *analysis.Pass, c types.TemporalCall, actualT goTypes.Type, callArg ast.Expr) {
+	var argName string
+	ident, ok := callArg.(*ast.Ident)
+	if ok {
+		argName = ident.Name
+	}
+	if is, why := asttools.IsSerializable(actualT); !is {
 		calleName := ""
 		if c.Callee != nil {
 			calleName = c.Callee.Name()
 		}
-		for i := 0; i < s.NumFields(); i++ {
-			f := s.Field(i)
-			if len(f.Name()) > 0 && unicode.IsLower(rune(f.Name()[0])) {
-				pass.Reportf(c.Pos, "Field `%s` of `%s` is not exported - it will not "+
-					"be visible to `%s`, and will assume its zero value", f.Name(), f.Type().String(), calleName)
-			}
-			if is, why := asttools.IsSerializable(f.Type()); !is {
-				pass.Reportf(c.Pos, "Field `%s` (`%s`) of `%s` is not serializable - it will not "+
-					"be visible to `%s`, and will assume its zero value\n\treason: %s", f.Name(), f.Type().String(),
-					actualT.String(), calleName, why)
-			}
-		}
+		pass.Reportf(callArg.Pos(), "call argument `%s` (`%s`) is not serializable - it will not "+
+			"be visible to `%s`, and will assume its zero value\n\treason: %s",
+			argName, actualT.String(),
+			calleName, why)
 	}
 }
 
