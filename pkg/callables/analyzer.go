@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go/ast"
 	goTypes "go/types"
+	"os"
 	"reflect"
 
 	"github.com/ikari-pl/golangci-lint-temporalio/pkg/external"
@@ -116,7 +117,13 @@ func identify(pass *analysis.Pass) (workflows, activities []goTypes.Object, regi
 				if alt != nil {
 					activities = append(activities, alt)
 				}
-				activities = append(activities, firstArgObj)
+				if firstArgObj == nil {
+					// can be an inline function, but we don't support that
+					position := pass.Fset.Position(callExpr.Pos())
+					_, _ = fmt.Fprintln(os.Stderr, fmt.Sprintf("WARN: First argument of RegisterActivityWithOptions is not a function reference: %s", position))
+				} else {
+					activities = append(activities, firstArgObj)
+				}
 			default:
 				t = types.NotSupported
 			}
@@ -219,7 +226,7 @@ func checkCalleeMatchesRegistration(pass *analysis.Pass, registration Registrati
 	switch registration.Type {
 	case types.Workflow:
 		// worfklow's first argument is always a workflow.Context
-		if registration.CalleeSignature.Params().At(0).Type().String() != external.WorkflowCtx {
+		if !external.WorkflowCtx.MatchString(registration.CalleeSignature.Params().At(0).Type().String()) {
 			pass.Reportf(registration.Call.Pos(),
 				"Workflow must take a workflow.Context as the first argument. Did you want to register an activity?")
 		}
@@ -228,7 +235,7 @@ func checkCalleeMatchesRegistration(pass *analysis.Pass, registration Registrati
 		argType := registration.CalleeSignature.Params().At(0).Type().String()
 		if argType != external.ActivityCtx {
 			msg := "Activity must take a context.Context as the first argument"
-			if argType != external.WorkflowCtx {
+			if !external.WorkflowCtx.MatchString(argType) {
 				msg += ". Did you want to register a workflow?"
 			}
 			pass.Reportf(registration.Call.Pos(), msg)
