@@ -8,10 +8,11 @@ import (
 	"os"
 	"reflect"
 
+	"golang.org/x/tools/go/analysis"
+
 	"github.com/ikari-pl/golangci-lint-temporalio/pkg/external"
 	"github.com/ikari-pl/golangci-lint-temporalio/pkg/internal/asttools"
 	"github.com/ikari-pl/golangci-lint-temporalio/pkg/internal/types"
-	"golang.org/x/tools/go/analysis"
 )
 
 var Analyzer = &analysis.Analyzer{
@@ -238,7 +239,7 @@ func checkCalleeMatchesRegistration(pass *analysis.Pass, registration Registrati
 			if !external.WorkflowCtx.MatchString(argType) {
 				msg += ". Did you want to register a workflow?"
 			}
-			pass.Reportf(registration.Call.Pos(), msg)
+			pass.Reportf(registration.Call.Pos(), msg, nil)
 		}
 	case types.NotSupported:
 	// pass
