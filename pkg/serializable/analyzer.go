@@ -6,13 +6,15 @@ import (
 	"go/ast"
 	"go/token"
 	goTypes "go/types"
+	"os"
+
+	"github.com/spf13/pflag"
+	"golang.org/x/tools/go/analysis"
 
 	"github.com/ikari-pl/golangci-lint-temporalio/pkg/callables"
 	"github.com/ikari-pl/golangci-lint-temporalio/pkg/external"
 	"github.com/ikari-pl/golangci-lint-temporalio/pkg/internal/asttools"
 	"github.com/ikari-pl/golangci-lint-temporalio/pkg/internal/types"
-	"github.com/spf13/pflag"
-	"golang.org/x/tools/go/analysis"
 )
 
 var Analyzer = &analysis.Analyzer{
@@ -117,7 +119,7 @@ func checkArgType(pass *analysis.Pass, c types.TemporalCall, actualT goTypes.Typ
 		if c.Callee != nil {
 			calleName = c.Callee.Name()
 		}
-		pass.Reportf(callArg.Pos(), "call argument `%s` (`%s`) is not serializable - it will not "+
+		pass.Reportf(callArg.Pos(), "call argument `%s` (`%s`) is not žserializable - it will not "+
 			"be visible to `%s`, and will assume its zero value\n\treason: %s",
 			argName, actualT.String(),
 			calleName, why)
@@ -227,8 +229,12 @@ func identifyCalls(pass *analysis.Pass) []types.TemporalCall {
 			// and for activities, it's: workflow.ExecuteActivity(ctx, HelloWorldActivity, name)
 			// where workflow is import "go.temporal.io/sdk/workflow"
 			if len(call.Args) < 2 {
-				// warn: not enough arguments, should never happen
-				panic("not enough arguments to be a valid ExecuteWorkflow/Activity call")
+				// log as much as we can about the call
+				fmt.Fprintf(os.Stderr, "WARN: call to %s at %s has only %d arguments\n",
+					selector.Sel.Name, pass.Fset.Position(call.Pos()), len(call.Args))
+				// warn: not enough arguments, can happen for .ExecuteWorkflow(function)
+				fmt.Fprintf(os.Stderr, "Ignoring it, as we cannot analyze it\n")
+				return true
 			}
 			xType := pass.TypesInfo.TypeOf(x)
 			if xType != nil && xType.String() == external.ClientType {

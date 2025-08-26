@@ -121,7 +121,7 @@ func identify(pass *analysis.Pass) (workflows, activities []goTypes.Object, regi
 				if firstArgObj == nil {
 					// can be an inline function, but we don't support that
 					position := pass.Fset.Position(callExpr.Pos())
-					_, _ = fmt.Fprintln(os.Stderr, fmt.Sprintf("WARN: First argument of RegisterActivityWithOptions is not a function reference: %s", position))
+					_, _ = fmt.Fprintln(os.Stderr, fmt.Sprintf("WARN: first arg of RegisterActivityWithOptions is not a function: will not analyze this activity:\n\t %s", position))
 				} else {
 					activities = append(activities, firstArgObj)
 				}
@@ -244,6 +244,7 @@ func checkCalleeMatchesRegistration(pass *analysis.Pass, registration Registrati
 	case types.NotSupported:
 	// pass
 	default:
-		panic("unsupported Temporal.io call type")
+		// should not happen
+		fmt.Fprintf(os.Stderr, "ERROR: Unsupported Temporal.io call type: %v\n", registration.Type)
 	}
 }
