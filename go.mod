@@ -1,3 +1,4 @@
+// Deprecated: use github.com/ikari-pl/go-temporalio-analyzer instead
 module github.com/ikari-pl/golangci-lint-temporalio
 
 go 1.25
