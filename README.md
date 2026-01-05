@@ -1,3 +1,6 @@
+> [!CAUTION]
+> # deprecated by [@ikari-pl/go-temporalio-analyzer](https://github.com/ikari-pl/go-temporalio-analyzer) - more modern, smarter, more powerful tool
+
 # Temporal.io Go Linter
 
 A linter for validating Temporal.io workflow and activity invocations in Go projects.
