@@ -1,5 +1,5 @@
 > [!CAUTION]
-> # deprecated by [@ikari-pl/go-temporalio-analyzer](https://github.com/ikari-pl/go-temporalio-analyzer) - more modern, smarter, more powerful tool
+> # deprecated, superseded by [@ikari-pl/go-temporalio-analyzer](https://github.com/ikari-pl/go-temporalio-analyzer) - more modern, smarter, more powerful tool
 
 # Temporal.io Go Linter
 
